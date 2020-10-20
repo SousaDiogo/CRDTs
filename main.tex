@@ -1,0 +1,528 @@
+\documentclass{article}
+
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08emT\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+
+\usepackage{titling}
+\usepackage[utf8]{inputenc}
+\usepackage{tikz-cd}
+\usepackage{stmaryrd}
+\usepackage{color}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{textcomp}
+\usepackage{bmpsize}
+\usepackage{xcolor}
+\usepackage{lipsum}
+\usepackage{algorithm}
+\usepackage[noend]{algpseudocode}
+\usepackage{adjustbox}
+\usepackage{comment}
+\usepackage{paralist}
+ 
+\newtheorem{definition}{Definition}[section]
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{lemma}{Lemma}[section] 
+
+\input{header}
+
+
+ \addtolength{\intextsep}{-0.3cm}% : space left on top and bottom of an in-text float
+ \addtolength{\textfloatsep}{-0.3cm}% is \textfloatsep for 2 column output
+ \addtolength{\dbltextfloatsep}{-0.3cm} %distance between a float spanning both columns and the text
+ \addtolength{\floatsep}{-0.2cm} %distance between two floats
+ \addtolength{\dblfloatsep}{-0.2cm} %distance between two floats spanning both columns
+ \addtolength{\abovecaptionskip}{-0.3cm}%: space above caption
+ \addtolength{\belowcaptionskip}{-0.2cm}%: space below caption
+
+ \addtolength{\skip\footins}{-0.2cm}
+
+
+\title{CRDTs}
+\author{Diogo Sousa}
+\date{October 2019}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+\begin{itemize}
+    \item Distributed Systems provide Low latency and high availability. Nodes can fail.
+    \item Eventual consistency and casual consistency. Nodes update asynchronously.
+    \item CRDTS:
+    \begin{itemize}
+        \item (i) any replica can be modified without coordinating with any other replicas;
+        \item (ii) when any two replicas have received the same set of updates, they reach
+the same state, deterministically, by adopting mathematically sound rules
+to guarantee state convergence.
+    \end{itemize}
+\end{itemize}
+\section{CRDTS}
+\subsection{Concurrency}
+\begin{itemize}
+    \item Operations:
+    \begin{itemize}
+        \item Query: does not affect the state
+        \item Update: can change the state
+    \end{itemize}
+    \item Nodes:
+    \begin{itemize}
+        \item Has replica of the Object
+        \item Applications affect the state of replica in Node
+        \item Updates change the state of the node and are then propagated
+    \end{itemize}
+    \item Commuting: updates might naturally commute, but mostly they don't
+    \begin{itemize}
+        \item Happens-before relation: $u1 \prec u2$ , iff the effects of u1 had been applied in the replica where u2 was executed initially.
+        \item Total order relation: Logic Clocks, Last-Write-Wins
+        \begin{itemize}
+            \item Register: 
+            \begin{itemize}
+                \item Multi-value: Concurrent value are all kept. Returns a set of operations
+                \item Last-Write wins: Priority given to the last written value, only this value is kept.
+            \end{itemize}
+            \item Counter: value = \#increases - \#decreases
+            \begin{itemize}
+                \item write-wins: the difference between the number of inc and dec updates that happened after the last write
+                \item merge: the difference between the number of inc and dec updates that have not happened before the last write.
+            \end{itemize}
+            \item Set: Adds and Removes
+            \begin{itemize}
+                \item Add-Wins: if an add and a remove happen concurrently, add wins so that there will never be a remove of an element not added.
+                \item Remove-Wins: if the two happen concurrently, remove wins, resulting in a state where the element is not present if there is no add after a remove.
+                \item Last-Write: if concurrently, the winning operation would be the one higher in the total order of the set of operations.
+            \end{itemize}
+            \item Lists:
+            \begin{itemize}
+                \item rmv(i): removes element in i
+                \item ins(i,e): inserts element e, after the in the element of position i of the replica where the insert was called.
+            \end{itemize}
+            \item Maps: 
+            \begin{itemize}
+                \item upd(k,opt), performs an operation on key k
+                \item Remove-as-a-recursive-reset: the value is updated to bottom value and therefore a remove and a add that happen concurrently can be merged
+                \item Remove-wins: the remove cancel all operations on the element, concurrently or prior to the remove. Avoids keeping state of something already removed
+                \item update-wins: the update cancel the concurrent remove.
+            \end{itemize}
+        \end{itemize}
+    \end{itemize}
+    \item Discussion
+    \begin{itemize}
+        \item Preservation of sequential semantics: not all CRDTs can achieve it but they should in order to be correct.
+        \item Principle of permutation equivalence: if all operations in different order acheive the same result, concurrent operations in CRDTs should also achieve that result. if Sequential Semantics is achieved than this is too.
+        \item Equivalence to a sequential execution: Executing all sequencial operations should be the same as checking the state. State = 1º operatino + 2º operation + 3º ... nth operation.
+        \item Extended behavior under concurrency: Some cases happen where the state does not represent a sequential execution of all operations, Add-win for instance.
+        \item Stability of arbitration: A CRDT is arbitrationly stable if a cast-off update remains cast off in the future and $O = O / {c}$, $O$ being the sequential execution of all operations on the state
+    \end{itemize}
+\end{itemize}
+
+\subsection{Advanced Topics}
+\begin{itemize}
+    \item Concurrency semantics with multiple options: sometimes we want add-win sometimes remove-win, or other, but we must choose one, it's an open problem.
+    \item  Encapsulating invariant preservation: Enforced Invariants like bounderies can help with the correctness of the mehtods used.
+\end{itemize}
+\section{Development}
+\subsection{Synchronization}
+\begin{itemize}
+    \item State-based synchronization: Synchronization is done with a method called merge that makes all the states converge if: (i) the possible states are partially ordered, (ii) un update modifies a state with an inflation, making it bigger or equal, (iii) the merge produces a join $s1 \cup s2$ that is the least upper bound. The synchronization connections are made between nodes in a bi-directional connection and an update affects all the network as long as the graph of connections is connected.
+    \item Operation-based synchronization: This operations are done transmiting the operation to every node, using a generator (which affects the state of the node where the op was done) and a effector, which encodes the side-effects of an update based on the previous state, and this effector is then replicated. if the operations are in casual order replicas will converge, if they are not they must be commutable to converge, if they are done more than once they need to be idempotent.
+    \item Delta-based: Communicating only the changed part of a state, just like effectors, but effectors might be delayed and do changes that could be compressed into one. i.e. sending two add(1) could be compressed to sending one add(2) in a state that has already processed both effectors, instead of sending out two add(1) again.
+    \item Pure operation-based synchronization: Sending the Operation to be executed instead of the side-effect that was caused by executing it on a state. more complex and requires metadata, but sometimes needed.
+    \item Discution:
+    \begin{itemize}
+        \item Immediate synchronization required: state-based is slow, delta based is better because we have "compressed operations" an they are idempotent and not "exactly-once".
+        \item Replica synchronization after failures: save a local state and run the missing operations or connect to a remote state and run the remaining operations.
+        \item Idempotence and exactly-once delivery: Idempotence is more complex and while more interesting because of dropping the exactly-once property, exactly-once requires metadata that can later be used to check if an operations was already done in a less complex way.
+    \end{itemize}
+\end{itemize}
+\subsection{Aplications}
+They are used.
+\subsection{Advanced topics}
+\begin{itemize}
+    \item transactions: two problems: (1) all concurrent operations must be considered to achieve the final state. (2) The system need to allow multiple versions of the same state because some actions might be in process while other arrive.
+    \item  Support for large objects: Instead of acumulating lots of objects inside of a big one (maps), it is possible to use separated objects (using map to hold pointers to the real objects) and perform the transactions on those smaller objects. If the object himself holds large amounts of information, it's a solution to break that object into smaller sub objects connected in a implementation level.
+    \item Non-uniform replicas: Mantaining partial replicas can be a good solution when the queries are only done in a sub part of the state and the rest is stored away for removes (it doesn't need to exist if it can only be removed), thus resulting in non-uniform replicas, very different from one another.
+    \item storage: Storing an n number of operations until the state is read by an aplication can help reduce the number os reads on a state and in some cases reduces the operations by compressing them into one.
+\end{itemize}
+\section{CRDT Development}
+\subsection{Designs}
+(i) the full history of updates executed \\ (ii) the happens-before relation
+among updates \\ (iii) an arbitration relation among updates 
+\begin{itemize}
+    \item Commutativity and associativity: An operation based can be done transmiting the operatin or the effector, but using commutativity and associativity we can rely on a state-based replication making the operations happen once only but requires a merge.
+    \item Total order for arbitration: Timestamps are the most commun way to mantain total order.
+    \item Unique identifiers: UID are created and its impossible to create the same UID, and after being created in can only be deleted, more than once but resulting in the same state, When used in sets, if a remove and an add happen concurrently, because UID cannot be deleted if not added before, no decision is required because the add operation will always win and create the element, because the remove will not do anything.
+    \item Summaries of unique identifiers: One problem with UID is knowing when a UID was created or deleted, and a solution is the keep a summary of the UID that were deleted and added, bue we need to have efficient UID that will never colide but are easy to summarise, \{timestamp + replica id\} is a good solution.
+    \item Dense space for unique identifiers: If the order of the UID matters (lists) and we need to always be able to add new UID between two existing ordered UID, we need a dense space that allows to never run out of space between two UID. One solution to this is using a TREE which allows to always insert a number between two other.
+    \item COMPLEXITY:
+    \begin{itemize}
+        \item Complexity: various methods have been proposed to reduce space, like discarding metadata once the replicas become stable, but the space complexity is around O(n) because metadata is constant and we need metadata for each n element. (if there's no use of tombstones)
+        \item Cannot be generally calculated.
+    \end{itemize}
+\end{itemize}
+\subsection{Advanced topics}
+\begin{itemize}
+    \item Reversible computation: Open research but it's useful to be able to undo a certaint operation over a sub system of a big system that might be considered a fail.
+    \item Security: in a state-based system, the state represents a compression of a series of opertions, so we can alter the state to do whichever operation we want in an attack, connect and propagate that altered state causing destruction. Other security issue is not trusting the provider of the service that stores the states, this brings cryptography into the mix and it would need to be done on edge, unless a way to work over encrypted data would work.
+    \item Verification: Open problems, various methods are proposed to specific implementation.
+\end{itemize}
+\newpage
+\title{Cryptography}
+\maketitle
+
+\section{Additive MACs}
+
+The following description of homomorphic MACs are based on (https://eprint.iacr.org/2015/194.pdf).\\
+
+The idea of additive macs sets a group of participants with a known common key $K$, where the agents in this group can generate a code that serves as an authentication of a message produced by in the system, and any agent of the group is able to verify this authenticity using the message and the key but is also able to verify any computation made over those messages. For example, if the server contains $msg_1$ and $msg_2$ with the respective tags $t_1$,$t_2$, if asked to process $msg_1 + msg_2 = msg$ the server can calculate $t_1 + t_2 = t$ and the agents can authenticate $t$ using $msg$ and $k$, without the need for any agent to calculate $t$ from scratch.\\
+
+In other words, given a program $P()$ anyone can calculate $P()$ over any tags, $(\sigma_1,...,\sigma_n)$ that authenticate $(msg_1,...,msg_n)$, to generate a single tag $\sigma$ that authenticates the output of $P(msg_1,...,msg_n)$.\\
+
+This additive macs can be descrived as follows:
+
+\subparagraph{Additive Message Authenticators scheme.}An additive MAC scheme is a 5-tupple of algorithms that do the following operations:
+\begin{itemize}
+    \item \textbf{KeyGen($1^\lambda$):} the input is the security parameter $\lambda$, the key generation method outpus the secret key $sk$.
+    \item  \textbf{Auth($sk,L,m$):} uses the inputed key, $sk$, the inputed label $L$ and a message $m$ all in $Z_p$, and outputs a tag $\sigma \in Z_p$.
+    \item \textbf{Add($\sigma_1,\sigma_2$):} given two tags, $\sigma_1,\sigma_2,$ as input, the method outputs a single tag $\sigma$.
+    \item \textbf{Ver($sk,L,m,\sigma$):} same input as Auth() plus a tag $\sigma$ and outputs True or False.
+    \item \textbf{Ver($sk,\Vec{L},\Vec{m},\sigma$):} the input is a vector of labels and messages and the summed tag $\sigma$ and the output is True or False.
+\end{itemize}
+
+For this scheme to work it is required that $correctness$ and $security$ are present. Correctness to ensure the scheme acts accordingly to allow this verification, and security to ensure all the operations of the scheme do not risk the integrity and authentication of the data being shared.\\
+
+For correctness it is observed that to authenticate a message $m$ is to authenticate all messages in the execution which the output was $m$, so if it is true that $MAC(K,\Vec{L},\Vec{M}) = \sum MAC(K,L_i,M_i)$ the scheme is correct.\\
+\begin{equation}
+ \centering
+ \framebox{\setlength\tabcolsep{0pt}
+ \begin{minipage}[t]{0.5\textwidth}
+\textbf{Correctness}:\\
+$\forall k, \Vec{L},\Vec{M} :$\\
+$\sigma_i = MAC(k,L_i,M_i)$\\
+$Ver(k,\Vec{L},\sum\Vec{M},\sum \sigma_i)=T$
+\end{minipage}
+}
+\end{equation}
+\\
+
+For security we need to analyse the the game in equation 2.
+
+\begin{equation}
+ \centering \scriptsize
+ \framebox{\setlength\tabcolsep{0pt}
+       \begin{minipage}[t]{0.5\textwidth}  
+       \underline{\bf Game $TO-DO$}: \\
+	  $k \gets KeyGen(1^\lambda)$\\
+	  $\sigma \gets MAC(k,L,M)$ : $M,\sigma\in Z_p,L\in\{0,1\}^*$ \\
+	  $\sigma \gets Add(\sigma_1,\sigma_2)$: $\sigma,\sigma_1,\sigma_2\in Z_p$\\
+	  $T/F \gets Ver(k,L,M)$\\
+	  $T/F \gets Ver(k,\Vec{L},\Vec{M},\sigma)$
+     \end{minipage}
+}
+  \label{fig.counterCRDT}
+ \end{equation}
+ 
+
+
+\newpage
+\section{Bounded Counter}
+\subsection{Bounded CRDT}
+%copy to be changed latter
+The Bounded Counter must maintain the necessary information to verify whether it is safe to locally execute operations or not. This information consists in
+the rights each replica holds (as in the escrow transactional
+model).
+\\
+To maintain this information, for a system with n replicas, we use two data structures. The first, R is a matrix of n lines by n columns with: R[i][i] recording the increments executed at ri , which define an equal number of rights initially assigned to ri ; R[i][ j] recording the rights transferred from ri to rj . The second, U is a vector of n lines with U[i] recording the successful decrements executed at ri , which consume an equal number of rights.
+
+\subsubsection{Solution for secure Bounded CRDT}
+
+The Bounded CRDT follows the same principle of the normal CRDT Counter, where we have one or more arrays to mantain the increase and decrease of the state of each replica. The difference here is that we need to compare with 0 to know if the bounded has been exceeded.\\
+
+Our solution uses the homomorphic authentication scheme:\\
+
+\begin{itemize}
+    \item $p$ = prime of 256 bits
+    \item 
+    $
+        \begin{cases}
+            K \gets \{0,1\}^{256} \\
+            a \mapsfrom Z_p & a,x \in Z_p
+        \end{cases}
+    $
+\end{itemize}
+
+Every position of the array has a label, $L$, equal to the server id, $id$, and the operation counter, $op$ and the type of operation, $type$:
+\begin{equation}
+    L = ( id , op , type)
+\end{equation}
+
+
+Now given any $x$ the $\sigma$ of that $x$ is described as:\\
+        
+\begin{equation}
+    \sigma_i(x) = a \cdot (HMAC(K,L) + x) , \sigma(x) \in Z_p
+\end{equation}
+
+and
+
+\begin{equation}
+    \sigma = a \cdot ((\sum{HMAC(K,L_i)}) + x)
+\end{equation}
+
+making it so that $x$ is possible to verify using $\sigma(x,(a,K))$.
+\\
+
+When this information gets shared with other servers, through mergings, the clients of other servers can verify the value by calculating all previous tags, this is possible because they are unitary, so if the counter is $x$, then the client can calculate,
+\begin{equation}
+    \sum_{i=0}^{i=x}{a \cdot (HMAC(i,(id,op_i) + 1)}
+\end{equation}
+
+By comparing this sum with the tag $\sigma$ received by the server, the client can accept or reject the update.\\
+
+Let a BoundedCounter be a structure with the following data:
+\begin{itemize}
+    \item \textbf{Rights[ ]}: An array of rights where every position corresponds to a server in the network.
+    \item \textbf{Used[ ]}: An array of rights already used by the server corresponding to the position.
+    \item \textbf{rightsMAC[ ]}: An array of tags to verify every position of the Rights array.
+    \item \textbf{usedMAC[ ]}: An array of tags to verify every position of the Used array.
+\end{itemize}
+
+with the following operations:
+\begin{itemize}
+    \item \textbf{increase()}: increases 1 single value of the counter.
+    \item \textbf{decrease()}: decreases, if possible, 1 single value of the counter.
+    \item \textbf{merge()}: merges two replicas forming a new, more recent, valid state.
+    \item \textbf{get()}: returns the value of the counter.
+\end{itemize}
+
+Let $n$ be the number of replicas, $K$ a secret key in $Z_p$ known olny by the clients, $a$ a random in $Z_p$ known only by the clients and $HMAC()$ an hashing function.\\
+
+An increase() is executed by a client connected to a replica, $r_i$, by creating a linearly homomorphic tag, $\sigma$, representing the increase of 1 single value. this tag is added, using a sum, to $rightsMAC[i]$ and changing the value of $Rights[i]$ by 1.\\
+
+A decrease() operation starts with a client checking if the invariant allows for a new decrement, a simple check if $Rights[i]>Used[i]$. If possible, the client generates a tag, $\sigma$, representing the decrease of 1 single value. This tag is added, using a sum, to $usedMAC[i]$ and changing the value of $Used[i]$ by 1.\\
+
+The local value of $r_i$ is $Rights[i]$ - $Used[i]$. By summing all local values, $i \in {1,2,...,n}$, we get the value of the counter.\\
+
+The client verifies the local value of $r_i$, accessing $Rights[i]$ and generating tags of $HMAC(K,L(i,j,1))$ where $j: \{1,2,...,Rights[i]\}$, summing all this tags to generate $\sigma_i$. By calculating $a \cdot \sigma_i + Rights[i]$ the client should get the same value stored in $rightsMAC[i]$, if not, the value has been corrupted by a server. The process if repeated for $Used[i]$, the client generates $HMAC(K,L(i,j,-1))$ where $j: \{1,2,...,Used[i]\}$, summing all tags generating $\sigma_d$, and calculating $a \cdot \sigma_d + Used[i]$, comparing the results with $usedMAC[i]$. If no fails happens for all $i$, then the client can verify the integrity of the counter.\\
+
+The merge happens when a replica receives the state of a remote replica and checks for every single value of $Rights$ and $Used$, keeping the higher of each and then saving the tag of the higher on $rigthsMAC$ and $usedMAC$ respectably.\\
+
+\subsubsection{Security}
+
+In this scheme, the security is assured using a trusted client system.\\
+
+The client, once authenticated, has access to the key, $K$ and to the random $a$ which allows for the calculation of $a \cdot HMAC(K,L) + x \in Z_p$.\\
+
+Since the servers do not have access to this secret components, they are not able to produce false tags or forged ones, and since no two operations have a similar label, $L$, which are formed of an $id$, an operation number $op$, and an operation type $type=[1,-1]$, no tuple $(id,op,type)$ is equal, so the server is not able to reuse or omit tags without generating faults on the verification. For example, if the server hides the tag with the label (1,2,-1), if later the label (1,3,-1) is received the server can only accept it if it accepts the hidden one, otherwise the verification on the client side will generate the label (1,2,-1) before (1,3,-1) and the tag on the server will not be accepted. In the same way the server is not allowed to lie about the rights and used rights numbers because they represent the operation value used inside the tags, the server can only subtract 1 from this counters when omitting a tag in order for the verification to work, but like said before, this is not possible without fails. The server can omit a tag and never accept any other after that, but that is the same as the server going idle of losing connection, providing no integrity issues.\\
+
+As for confidentiality, the $min$ value is sent on initialization to the server, encrypted with $K$, $E(K,min)$. The server does not need the value $min$ for any of his operations so even though the number of increases and decreases is known to the server, without the $min$ the server can never know the counter value which is represented by $min + rights - used$.
+
+\newpage
+\subsubsection{Counter Scheme}
+For this scheme we use a CRDT counter where the update operations increment the operation counter of the respective replica which are then compared in the merge to determine the most recent operation. Since we have a per-replica operation counter (Lambert Clock) we do not need to compare the values of the counter. For this scheme we will assume the counter to be plain text but since no comparisons or operations are done based on the counter value we can apply the same scheme for an homomorphic encrypted counter.\\
+
+As for the Homomorphic MAC that will allow for the verifying of messages, our scheme uses a linear homomorphic authentication scheme that where the secret key $a$ is multiplied to the counter and a label (expressed by the operation counter and the id of the replica being updated) resulting in a tag that the server can not produce without $a$.\\
+
+Assuming the clients are all in sync about the operation counter of a replica, the server can add homomorphically all the tags the clients send with no need for checking. The verification can be done by any client that receives the counter and the added tags, as well as a list of all labels assumed by the server. The idea is that once all the labels are added and we add the counter received by the server, the client needs only to multiply $a$ and check if the result is the same as the tag received from the server.\\
+
+So for $x$ being the counter and $x_i$ the increment in the $i$th operation, $L$ the sum of the labels and $L_i$ the label in the $i$th operation, $a$ the private key in the linear encryption and $K$ the key in the hashing of the labels we have:
+\begin{equation}
+   \sigma = a\cdot (HMAC(K,L)+x) = a \cdot (\sum_{i=0}^{i=n}HMAC(K,L_i) + x_i )
+\end{equation}
+
+So we argue that by receiving $\sigma$, $x$, and a list of all labels, the client can produce $a \cdot ((\sum_{i=0}^{i=n}HMAC(K,L_i)) + x)$ obtaining the $\sigma$. If the server lies about the labels or $x$, the equation will result in a different $\sigma$, and since the server is not able to produce a wrong $\sigma$ this is considered secure.\\
+
+We therefore adapt the following operations of the base CRDT in the scheme:
+\begin{itemize}
+    \item \textbf{update()}, which now produces $a\cdot (HMAC(K,L) + x)$ as $\Delta.\Sgn$;
+    \item \textbf{query()}, which now calls the new function \textbf{verify()};
+    \item \textbf{verify()}, which calculates the tag $\sigma$ based on the labels recieved and returns true if equal to the $\sigma$ on the server using $\Delta.\Add$ and $\Delta.\Sgn$;
+    \item \textbf{init()}, which now accounts for the structers required for holding the extra information needed.
+\end{itemize}
+
+
+TO-DO: proof, better explanation of the base CRDT, security discussion.
+
+\begin{figure}
+ \centering \scriptsize
+ \framebox{\setlength\tabcolsep{0pt}
+       \begin{minipage}[t]{0.5\textwidth}  
+       \underline{\bf Oracle $\query\langle\op\,|\,\st\rangle $}: \\
+	  $(C_p,C_n,\cdot,N) \gets \st$\\
+	  $r_1 \gets 0$\\
+	  $r_2 \gets 0$\\
+	  If not $\verify\langle\prms_q|st\rangle $: Error\\
+	  For $\id \in N$:\\
+	  \phantom{x}$r_1 \gets \Add(r_1,\mathsf{fst} \,C_p[\id])$\\
+	  \phantom{x}$r_2 \gets \Add(r_2,\mathsf{fst} \,C_n[\id])$\\
+	  $t \gets (r_1,r_2)$\\
+	  Return $\langle(r_1 - r_2)\,|\,\cdot\rangle_t$\\
+	  
+	\underline{\bf Oracle $\verify\langle\prms_q\,|\,\st\rangle $}: \\
+	  $(tag_p,tag_n,C_p,C_n,lab_p,lab_n,N) \gets \st$\\
+	  $t_p\gets0$\\
+	  $t_n\gets0$\\
+	  $i \gets [p,n]$\\
+	  For $\id \in N$:\\
+	  \phantom{x}For $\l \in lab_i[\id]$:\\
+	  \phantom{xx}$t_i \gets \Delta.\Add(t_i, \l)$\\
+	  \phantom{x}$t_i \gets \Delta.\Add(t_i,\mathsf{fst} \, C_i[\id])$\\
+	  \phantom{x}$t_i \gets \Delta.\Sgn(t_i, \prms_q)$\\
+	  \phantom{x}If $t_i != tag_i[\id]:$ Error\\
+	  %\phantom{x}For $\l \in lab_n[\id]$:\\
+	  %\phantom{x}\phantom{x}$MAC_n \gets \Delta.\Add(MAC_n, \l)$\\
+	  %\phantom{x}$MAC_n \gets \Delta.\Add(MAC_n, C_n[\id])$\\
+	  %\phantom{x}$MAC_n \gets \Delta.\Mul(MAC_n, \prms_q)$\\
+	  %\phantom{x}If $MAC_n != tag_n[\id]:$ Error\\
+	  Return $True$\\
+	
+	\underline{\bf Oracle $\update\langle\prms_u,\op,v\,|\,\st\rangle $}: \\
+	  $(C_p,C_n,tag_p,tag_n,lab_p,lab_n,\id,N) \gets \st$\\
+	  If $\op = \mathsf{inc}$: $i \gets p$\\
+	  Else: $i \gets n$\\
+	  $\l \gets ((\mathsf{snd} \,C_i[\id]) + 1,\id)$\\
+	  $t_i \gets \Delta.\Add(\l,v)$\\
+	  $t_i \gets \Delta.\Sgn(\l,\prms_u)$\\
+	  $C \gets ((\mathsf{fst} \,C_i[\id]),v)$\\
+	  $Op \gets ((\mathsf{snd} \,C_i[\id]) + 1)$\\
+	  $L \gets (lab_i[id] | \l)$\\
+	  $t \gets \Delta.\Add(tag_i[id],t_i)$\\
+	  $C_i[id] \gets (C,Op)$\\
+	  $tag_i[id] \gets (t)$\\
+	  $lab_i[id] \gets (L)$\\
+	  $\st \gets (C_p,C_n,tag_p,tag_s,lab_p,lab_n,\id,N)$\\
+	  %$t \gets (\cph, \op)$\\
+	  Return $\langle\epsilon\,|\,\st\rangle_t$
+     \end{minipage}
+     \begin{minipage}[t]{.44\linewidth}
+       \underline{\bf Oracle $\setup() $}: \\
+	  $(\sk,\prf) \sample \Delta.\Gen()$\\
+	  Return $(\sk,\prf)$\\
+	  \\
+	\underline{\bf Oracle $\init(\id, N)$}: \\
+	  For $k \in N$:\\
+	  \phantom{x}$C_p[k] \gets (0,0)$\\
+	  \phantom{x}$C_n[k] \gets (0,0)$\\
+	  \phantom{x}$tag_p[k] \gets (0)$\\
+	  \phantom{x}$tag_n[k] \gets (0)$\\
+	  \phantom{x}$lab_p[k] \gets []$\\
+	  \phantom{x}$lab_n[k] \gets []$\\
+	  $\st \gets (C_p, C_n, tag_p, tag_n, lab_p, lab_n, \id, N)$ \\
+	  Return $\st$\\
+	  \\
+       	\underline{\bf Oracle $\propagate(\st, \id)$}: \\
+	  $(C_p,C_n,tag_p,tag_n,lab_p,lab_n,\cdot,\cdot) \gets \st$\\
+	  Return $(C_p,C_n,tag_p,tag_n,lab_p,lab_n)$\\
+	  \\
+       \underline{\bf Oracle $\merge(\up,\st)$}: \\
+	  $(C_p,C_n,tag_p,tag_n,lab_p,lab_n,\id,N) \gets \st$\\
+	  $(C_p',C_n',tag_p',tag_n',lab_p',lab_n') \gets \up$\\
+	  $i \gets [p,n]$\\
+	  For $\id \in N$:\\
+	  \phantom{x}If $(\mathsf{snd} \, C_i'[\id]) > (\mathsf{snd} \, C_i[\id])$: \\
+	  \phantom{xx}$C_i[\id] \gets C_i'[\id]$\\
+	  \phantom{xx}$tag_i[\id] \gets tag_i'[\id]$\\
+	  \phantom{xx}$lab_i[\id] \gets lab_i'[\id]$\\
+	  Return $(C_p,C_n,tag_p,tag_n,lab_p,lab_n\id,N)$
+     \end{minipage}
+}
+  \caption{Counter from authentically homomorphic scheme $\Delta$} 
+  \label{fig.counterCRDT}
+ \end{figure}
+
+
+\subsubsection{Bounded Counter Scheme}
+
+TO-DO
+
+%Bounded Counter%
+
+
+\begin{figure}
+ \centering \scriptsize
+ \framebox{\setlength\tabcolsep{0pt}
+       \begin{minipage}[t]{0.5\textwidth}  
+       \underline{\bf Oracle $\query\langle\op\,|\,\st\rangle $}: \\
+	  $(C_p,C_n,\cdot,N) \gets \st$\\
+	  $r_1 \gets 0$\\
+	  $r_2 \gets 0$\\
+	  If not $\verify\langle\prms_q|st\rangle $: Error\\
+	  For $\id \in N$:\\
+	  \phantom{x}$r_1 \gets \Add(r_1,\mathsf{fst} \,C_p[\id])$\\
+	  \phantom{x}$r_2 \gets \Add(r_2,\mathsf{fst} \,C_n[\id])$\\
+	  $t \gets (r_1,r_2)$\\
+	  Return $\langle(r_1 - r_2)\,|\,\cdot\rangle_t$\\
+	  
+	\underline{\bf Oracle $\verify\langle\prms_q\,|\,\st\rangle $}: \\
+	  $(tag_p,tag_n,C_p,C_n,lab_p,lab_n,N) \gets \st$\\
+	  $t_p\gets0$\\
+	  $t_n\gets0$\\
+	  $i \gets [p,n]$\\
+	  For $\id \in N$:\\
+	  \phantom{x}For $\l \in lab_i[\id]$:\\
+	  \phantom{xx}$t_i \gets \Delta.\Add(t_i, \l)$\\
+	  \phantom{x}$t_i \gets \Delta.\Add(t_i,\mathsf{fst} \, C_i[\id])$\\
+	  \phantom{x}$t_i \gets \Delta.\Mul(t_i, \prms_q)$\\
+	  \phantom{x}If $t_i != tag_i[\id]:$ Error\\
+	  %\phantom{x}For $\l \in lab_n[\id]$:\\
+	  %\phantom{x}\phantom{x}$MAC_n \gets \Delta.\Add(MAC_n, \l)$\\
+	  %\phantom{x}$MAC_n \gets \Delta.\Add(MAC_n, C_n[\id])$\\
+	  %\phantom{x}$MAC_n \gets \Delta.\Mul(MAC_n, \prms_q)$\\
+	  %\phantom{x}If $MAC_n != tag_n[\id]:$ Error\\
+	  Return $True$\\
+	
+	\underline{\bf Oracle $\update\langle\prms_u,\op,v\,|\,\st\rangle $}: \\
+	  $(C_p,C_n,tag_p,tag_n,lab_p,lab_n,\id,N) \gets \st$\\
+	  If $\op = \mathsf{inc}$: $i \gets p$\\
+	  Else: $i \gets n$\\
+	  $\l \gets ((\mathsf{snd} \,C_i[\id]) + 1,\id)$\\
+	  $t_i \gets \Delta.\Add(\l,v)$\\
+	  $t_i \gets \Delta.\Sgn(\l,\prms_u)$\\
+	  $C \gets ((\mathsf{fst} \,C_i[\id]),v)$\\
+	  $Op \gets ((\mathsf{snd} \,C_i[\id]) + 1)$\\
+	  $L \gets (lab_i[id] | \l)$\\
+	  $t \gets \Delta.\Add(tag_i[id],t_i)$\\
+	  $C_i[id] \gets (C,Op)$\\
+	  $tag_i[id] \gets (t)$\\
+	  $lab_i[id] \gets (L)$\\
+	  $\st \gets (C_p,C_n,tag_p,tag_s,lab_p,lab_n,\id,N)$\\
+	  %$t \gets (\cph, \op)$\\
+	  Return $\langle\epsilon\,|\,\st\rangle_t$
+     \end{minipage}
+     \begin{minipage}[t]{.44\linewidth}
+       \underline{\bf Oracle $\setup() $}: \\
+	  $(\sk,\prf) \sample \Delta.\Gen()$\\
+	  Return $(\sk,\prf)$\\
+	  \\
+	\underline{\bf Oracle $\init(\id, N)$}: \\
+	  For $k \in N$:\\
+	  \phantom{x}$C_p[k] \gets (0,0)$\\
+	  \phantom{x}$C_n[k] \gets (0,0)$\\
+	  \phantom{x}$tag_p[k] \gets (0)$\\
+	  \phantom{x}$tag_n[k] \gets (0)$\\
+	  \phantom{x}$lab_p[k] \gets []$\\
+	  \phantom{x}$lab_n[k] \gets []$\\
+	  $\st \gets (C_p, C_n, tag_p, tag_n, lab_p, lab_n, \id, N)$ \\
+	  Return $\st$\\
+	  \\
+       	\underline{\bf Oracle $\propagate(\st, \id)$}: \\
+	  $(C_p,C_n,tag_p,tag_n,lab_p,lab_n,\cdot,\cdot) \gets \st$\\
+	  Return $(C_p,C_n,tag_p,tag_n,lab_p,lab_n)$\\
+	  \\
+       \underline{\bf Oracle $\merge(\up,\st)$}: \\
+	  $(C_p,C_n,tag_p,tag_n,lab_p,lab_n,\id,N) \gets \st$\\
+	  $(C_p',C_n',tag_p',tag_n',lab_p',lab_n') \gets \up$\\
+	  $i \gets [p,n]$\\
+	  For $\id \in N$:\\
+	  \phantom{x}If $(\mathsf{snd} \, C_i'[\id]) > (\mathsf{snd} \, C_i[\id])$: \\
+	  \phantom{xx}$C_i[\id] \gets C_i'[\id]$\\
+	  \phantom{xx}$tag_i[\id] \gets tag_i'[\id]$\\
+	  \phantom{xx}$lab_i[\id] \gets lab_i'[\id]$\\
+	  Return $(C_p,C_n,tag_p,tag_n,lab_p,lab_n\id,N)$
+     \end{minipage}
+}
+  \caption{Bounded Counter from authentically homomorphic scheme $\Delta$} 
+  \label{fig.counterCRDT}
+ \end{figure}
+
+
+\end{document}
