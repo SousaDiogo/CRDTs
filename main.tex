@@ -317,7 +317,7 @@ Since the servers do not have access to this secret components, they are not abl
 As for confidentiality, the $min$ value is sent on initialization to the server, encrypted with $K$, $E(K,min)$. The server does not need the value $min$ for any of his operations so even though the number of increases and decreases is known to the server, without the $min$ the server can never know the counter value which is represented by $min + rights - used$.
 
 \newpage
-\subsubsection{Counter Scheme}
+\subsection{Counter Scheme}
 For this scheme we use a CRDT counter where the update operations increment the operation counter of the respective replica which are then compared in the merge to determine the most recent operation. Since we have a per-replica operation counter (Lambert Clock) we do not need to compare the values of the counter. For this scheme we will assume the counter to be plain text but since no comparisons or operations are done based on the counter value we can apply the same scheme for an homomorphic encrypted counter.\\
 
 As for the Homomorphic MAC that will allow for the verifying of messages, our scheme uses a linear homomorphic authentication scheme that where the secret key $a$ is multiplied to the counter and a label (expressed by the operation counter and the id of the replica being updated) resulting in a tag that the server can not produce without $a$.\\
@@ -429,7 +429,7 @@ TO-DO: proof, better explanation of the base CRDT, security discussion.
   \label{fig.counterCRDT}
  \end{figure}
 
-
+\newpage
 \subsubsection{Bounded Counter Scheme}
 
 TO-DO
